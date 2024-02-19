@@ -53,7 +53,7 @@ import org.pentaho.reporting.libraries.resourceloader.ResourceLoadingException;
 import org.pentaho.reporting.libraries.resourceloader.ResourceManager;
 
 public class DefaultHtmlContentGenerator implements HtmlContentGenerator {
-  private static class ImageData {
+  public static class ImageData {
     private byte[] imageData;
     private String mimeType;
     private String originalFileName;
@@ -271,7 +271,7 @@ public class DefaultHtmlContentGenerator implements HtmlContentGenerator {
         knownImages.put( cacheKey, contentURL );
       }
 
-      return contentURL;
+      return contentURL; // NOTE: this is the text for the <img SRC
     } catch ( ContentCreationException cce ) {
       // Can't create the content
       logger.warn( "Failed to create the content image: Reason given was: " + cce.getMessage() );
@@ -372,7 +372,7 @@ public class DefaultHtmlContentGenerator implements HtmlContentGenerator {
     return validRawTypes.contains( mimeType );
   }
 
-  private ImageData getImageData( final ImageContainer image, final String encoderType, final float quality,
+  public ImageData getImageData( final ImageContainer image, final String encoderType, final float quality,
       final boolean alpha ) throws IOException, UnsupportedEncoderException {
     ResourceManager resourceManager = getResourceManager();
     ResourceKey url = null;

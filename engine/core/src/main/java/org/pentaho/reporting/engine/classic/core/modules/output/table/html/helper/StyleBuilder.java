@@ -108,6 +108,9 @@ public interface StyleBuilder {
     POSITION( "position" ), TOP( "top" ),
 
     BACKGROUND_COLOR( "background-color", true ), OVERFLOW( "overflow" ), WIDTH( "width" ), HEIGHT( "height" ),
+
+    // POC DEV ADDED
+    CONTENT( "content" ),
     TRANSFORM_ORIGIN( "transform-origin" ), TRANSFORM( "transform" ), DIRECTION( "direction" );
 
     private String cssName;
