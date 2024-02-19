@@ -49,6 +49,7 @@ import org.pentaho.reporting.libraries.xmlns.writer.XmlWriterSupport;
 
 import java.io.IOException;
 import java.text.NumberFormat;
+import java.util.Base64;
 
 public class HtmlTextExtractorHelper {
   private static final String DIV_TAG = "div";
@@ -335,6 +336,13 @@ public class HtmlTextExtractorHelper {
     }
 
     if ( rawObject instanceof DrawableWrapper ) {
+      /*
+       * TODO look into another possible
+        * if ( !metaData.isFeatureSupported( AbstractTableOutputProcessor.BASE64_IMAGES ) ) {
+        * tryHandleDrawableBase64(...)
+        * }
+       */
+
       return tryHandleDrawable( attrs, width, height, contentWidth, contentHeight, styleSheet,
         (DrawableWrapper) rawObject );
     }
@@ -509,7 +517,21 @@ public class HtmlTextExtractorHelper {
     final String type = RenderUtility.getEncoderType( attrs );
     final float quality = RenderUtility.getEncoderQuality( attrs );
 
-    final String name = contentGenerator.writeImage( image, type, quality, true );
+    /** FIXME refactor HTMLContentGenerator#writeImage, reasoning -> separation of concerns
+     *  current class DefaultHtmlContentGenerator#writeImage does multiple things
+     *   - create ContentItem
+     *   - write out data to ContentItem.getOutputStream()
+     *   - return gets an image src value
+     *
+     *   split responsibility into two functions
+     *   - public ContentItem HTMLContentGenerator#writeImage(image, encoderType, quality, alpha) concerns:
+     *   - - create ContentItem
+     *   - - write out data to ContentItem.getOutputStream()
+     *   - - returns contentItem
+     *   - *new function* public String HTMLContentGenerator#rewrite(ContentItem)
+     *   - return gets an image src value
+     */
+    final String name = contentGenerator.writeImage( image, type, quality, true ); // NOTE: code inside will be used later
     if ( name == null ) {
       // xmlWriter.writeComment("Drawable content [No image written]:" + source);
       return false;
@@ -518,7 +540,14 @@ public class HtmlTextExtractorHelper {
     // xmlWriter.writeComment("Drawable content:" + source);
     // Write image reference ..
     final AttributeList attrList = new AttributeList();
-    attrList.setAttribute( HtmlPrinter.XHTML_NAMESPACE, SRC_ATTR, name );
+    // POC HACK just want the picture name
+    int indexStart = name.lastIndexOf( "picture" );
+    int indexEnd = name.lastIndexOf( "/" );
+    String imgAltText = name.substring( indexStart, indexEnd );
+    attrList.setAttribute( HtmlPrinter.XHTML_NAMESPACE, ALT_ATTR, imgAltText );
+
+    // FIXME POC HACK  - don't want img.src to pull from JCR
+    attrList.setAttribute( HtmlPrinter.XHTML_NAMESPACE, SRC_ATTR, "poc-src-placeholder-" + imgAltText );
     attrList.setAttribute( HtmlPrinter.XHTML_NAMESPACE, "border", "0" ); // NON-NLS
 
     final Object titleText = attrs.getAttribute( AttributeNames.Html.NAMESPACE, AttributeNames.Html.TITLE );
@@ -536,12 +565,31 @@ public class HtmlTextExtractorHelper {
     // of the image map, if there is one. So we have to call this method first.
     final ImageMap imageMap = extractImageMap( attrs, drawable, width, height, name, attrList );
 
+    try {
+      // TODO POC code stolen from above -  contentGenerator.writeImage(...)
+      final DefaultHtmlContentGenerator.ImageData imageData =
+        ( (DefaultHtmlContentGenerator) contentGenerator ).getImageData( image, type, quality, true ); // TODO expose #getImageData to interface or pass in AttrList
+      final String HTML_IMG_CSS_BASE64_FORMAT = "url('data:%1$s;base64,%2$s')";
+      String urlBase64Encoding = String.format( HTML_IMG_CSS_BASE64_FORMAT,
+          imageData.getMimeType(), getBase64( imageData ) );
+      // FIXME POC HACK - passing content to via attrList for #writeImageTag, look into adding to stylesheet
+      // TODO look into tradeoffs between <img src, img.content:, and url img.background-image: url
+      attrList.setAttribute( HtmlPrinter.XHTML_NAMESPACE, "content", urlBase64Encoding );
+    } catch ( Exception e ) {
+      throw new ContentIOException( "POC Hack failed", e );
+    }
+
     writeImageTag( styleSheet, width, height, contentWidth, contentHeight, attrList );
 
     if ( imageMap != null ) {
       ImageMapWriter.writeImageMap( xmlWriter, imageMap, RenderUtility.getNormalizationScale( metaData ) );
     }
     return true;
+  }
+
+  public String getBase64( DefaultHtmlContentGenerator.ImageData imageData ) {
+    // TODO look into linebreaks for base64 encoding - https://onlinebase64tools.com/split-base64-into-chunks
+    return new String( Base64.getEncoder().encode( imageData.getImageData() ) );
   }
 
   private ImageMap extractImageMap( final ReportAttributeMap attributes, final Object rawObject, final long width,
@@ -651,7 +699,7 @@ public class HtmlTextExtractorHelper {
 
   private void writeImageTag( final StyleSheet styleSheet, final long width, final long height,
       final long contentWidth, final long contentHeight, AttributeList attrList ) throws IOException {
-    final StyleBuilder imgStyle = produceImageStyle( styleSheet, width, height, contentWidth, contentHeight );
+    final StyleBuilder imgStyle = produceImageStyle( styleSheet, width, height, contentWidth, contentHeight ); // DEV comment HERE is where the css names "style-XYZ" is created
     if ( imgStyle == null ) {
       final AttributeList clipAttrList = new AttributeList();
       final StyleBuilder divStyle = produceClipStyle( width, height );
@@ -661,6 +709,12 @@ public class HtmlTextExtractorHelper {
       xmlWriter.writeTag( HtmlPrinter.XHTML_NAMESPACE, IMG_TAG, attrList, XmlWriterSupport.CLOSE );
       xmlWriter.writeCloseTag();
     } else {
+      String urlBase64Encoding  = attrList.getAttribute( HtmlPrinter.XHTML_NAMESPACE, "content", null );
+      // FIXME HACK add "content" to proper place
+      if ( urlBase64Encoding != null ) {
+        imgStyle.append( StyleBuilder.CSSKeys.CONTENT, urlBase64Encoding );
+        attrList.removeAttribute( HtmlPrinter.XHTML_NAMESPACE, "content" );
+      }
       tagHelper.getStyleManager().updateStyle( imgStyle, attrList );
       xmlWriter.writeTag( HtmlPrinter.XHTML_NAMESPACE, IMG_TAG, attrList, XmlWriterSupport.CLOSE );
     }
